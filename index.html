@@ -2285,6 +2285,16 @@ function closeAdminGate(){
 }
 
 async function loadSharedAdminConfig(){
+  try{
+    const res=await fetch('/.netlify/functions/validate-admin?mode=config',{cache:'no-store'});
+    if(res.ok){
+      const data=await res.json();
+      if(data && data.username && data.hash){
+        return data;
+      }
+    }
+  }catch(_e){}
+
   const localAuth=loadAdminAuthRecord();
   if(localAuth && localAuth.username && localAuth.hash){
     return localAuth;
@@ -2626,7 +2636,7 @@ async function handleAdminPasswordChange(event){
     document.getElementById('secCurrentPass').value='';
     document.getElementById('secNewPass').value='';
     document.getElementById('secConfirmPass').value='';
-    showToast(`Senha atualizada com sucesso para "${newUser}" em todos os dispositivos conectados ao Netlify.`);
+    showToast(payload.message || `Senha atualizada com sucesso para "${newUser}" em todos os dispositivos conectados ao Netlify.`);
     return;
   }catch(err){
     console.error(err);

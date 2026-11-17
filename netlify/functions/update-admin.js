@@ -4,6 +4,7 @@ const { getStore } = require('@netlify/blobs');
 const AUTH_SALT = 'MV_SEC_SALT_2026_V1';
 const STORE_NAME = 'admin-auth';
 const STORE_KEY = 'config';
+const FALLBACK_EMAIL = 'marmitariadovale5@gmail.com';
 
 function deriveCredentialHash(username, password) {
   const normUser = String(username || '').trim().toLowerCase();
@@ -13,22 +14,70 @@ function deriveCredentialHash(username, password) {
     .toString('hex');
 }
 
-async function getAdminConfig() {
-  const store = getStore({ name: STORE_NAME });
-  const config = await store.getJSON(STORE_KEY);
-
-  if (config && config.username && config.hash) {
-    return config;
+function getFallbackAdminConfig() {
+  if (!global.__MV_ADMIN_CONFIG__) {
+    global.__MV_ADMIN_CONFIG__ = {
+      username: 'admin',
+      hash: deriveCredentialHash('admin', '12345678'),
+      email: FALLBACK_EMAIL
+    };
   }
 
-  const defaultConfig = {
-    username: 'admin',
-    hash: deriveCredentialHash('admin', '12345678'),
-    email: 'marmitariadovale5@gmail.com'
-  };
+  return global.__MV_ADMIN_CONFIG__;
+}
 
-  await store.setJSON(STORE_KEY, defaultConfig);
-  return defaultConfig;
+async function getStoreOrNull() {
+  try {
+    return getStore({
+      name: STORE_NAME,
+      siteID: process.env.NETLIFY_SITE_ID,
+      token: process.env.NETLIFY_API_TOKEN
+    });
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function getAdminConfig() {
+  const store = await getStoreOrNull();
+
+  if (store) {
+    try {
+      const config = await store.getJSON(STORE_KEY);
+      if (config && config.username && config.hash) {
+        return config;
+      }
+
+      const defaultConfig = {
+        username: 'admin',
+        hash: deriveCredentialHash('admin', '12345678'),
+        email: FALLBACK_EMAIL
+      };
+
+      await store.setJSON(STORE_KEY, defaultConfig);
+      return defaultConfig;
+    } catch (_error) {
+      // Continua em modo de fallback local quando o ambiente do Netlify Blobs não foi configurado.
+    }
+  }
+
+  return getFallbackAdminConfig();
+}
+
+async function persistAdminConfig(config) {
+  const store = await getStoreOrNull();
+
+  if (store) {
+    try {
+      await store.setJSON(STORE_KEY, config);
+      return { persisted: true, fallback: false };
+    } catch (_error) {
+      // Fallback in-memory enquanto o ambiente do Netlify Blobs não estiver habilitado.
+    }
+  }
+
+  global.__MV_ADMIN_CONFIG__ = { ...config };
+  return { persisted: false, fallback: true };
 }
 
 exports.handler = async function handler(event) {
@@ -95,8 +144,7 @@ exports.handler = async function handler(event) {
       email: email || config.email || 'marmitariadovale5@gmail.com'
     };
 
-    const store = getStore({ name: STORE_NAME });
-    await store.setJSON(STORE_KEY, updatedConfig);
+    const persisted = await persistAdminConfig(updatedConfig);
 
     return {
       statusCode: 200,
@@ -106,7 +154,10 @@ exports.handler = async function handler(event) {
         username: newUsername,
         email: updatedConfig.email,
         hash: nextHash,
-        message: 'Senha atualizada no armazenamento persistente do Netlify.'
+        fallback: persisted.fallback,
+        message: persisted.fallback
+          ? 'Senha atualizada em modo local porque o armazenamento persistente do Netlify Blobs não está configurado neste ambiente.'
+          : 'Senha atualizada no armazenamento persistente do Netlify.'
       })
     };
   } catch (error) {
@@ -115,7 +166,9 @@ exports.handler = async function handler(event) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         success: false,
-        error: 'Não foi possível atualizar a credencial persistente do painel.'
+        error: error && error.message
+          ? error.message
+          : 'Não foi possível atualizar a credencial persistente do painel.'
       })
     };
   }
