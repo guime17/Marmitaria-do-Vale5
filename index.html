@@ -2654,19 +2654,40 @@ function sendPasswordBackupByEmail(){
   showToast(`Abrindo envio de e-mail para ${rec.email||'marmitariadovale5@gmail.com'}!`);
 }
 
-function resetToBaseCredentials(){
+async function resetToBaseCredentials(){
   if(!confirm('Deseja redefinir o acesso administrativo para o usuário base (admin) e a senha padrão de 8 dígitos?')) return;
+  const curPass=prompt('Para confirmar, digite a senha ATUAL do painel:');
+  if(!curPass) return;
   const baseSecret=decodeCipherArray(BASE_VAULT_CIPHER);
   const rec=loadAdminAuthRecord();
+  const sharedConfig=await loadSharedAdminConfig();
+  const currentUser=String(sharedConfig.username||rec.username||'admin').trim().toLowerCase();
+  const email=sharedConfig.email||rec.email||'marmitariadovale5@gmail.com';
+  try{
+    const res=await fetch(NETLIFY_ADMIN_UPDATER,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      username:currentUser,
+      password:curPass,
+      newUsername:'admin',
+      newPassword:baseSecret,
+      email
+    })});
+    const payload=await res.json().catch(()=>({}));
+    if(!res.ok || !payload.success){
+      throw new Error(payload.error || 'Falha ao redefinir a senha no servidor.');
+    }
+  }catch(err){
+    showToast(err.message || 'Não foi possível redefinir a senha no servidor.');
+    return;
+  }
   const resetRecord={
     username:'admin',
     hash:BASE_CRED_HASH,
     vault:encodeVaultSecret(baseSecret),
-    email:rec.email||'marmitariadovale5@gmail.com',
+    email,
     updatedAt:null
   };
   saveAdminAuthRecord(resetRecord);
-  showToast('Usuário e senha redefinidos para o padrão base!');
+  showToast('Usuário e senha redefinidos para o padrão base em todos os dispositivos!');
 }
 
 function closeAdmin(){document.getElementById('adminPanel').classList.add('hidden');document.body.style.overflow='';}
