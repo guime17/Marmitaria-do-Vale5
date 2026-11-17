@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { getStore } = require('@netlify/blobs');
+const { getStore, connectLambda } = require('@netlify/blobs');
 
 const AUTH_SALT = 'MV_SEC_SALT_2026_V1';
 const STORE_NAME = 'admin-auth';
@@ -26,13 +26,25 @@ function getFallbackAdminConfig() {
   return global.__MV_ADMIN_CONFIG__;
 }
 
+function connectBlobs(event) {
+  // Funções no formato Lambda (exports.handler) precisam repassar o contexto
+  // do evento para que o Netlify Blobs seja configurado automaticamente.
+  if (event && event.blobs) {
+    try {
+      connectLambda(event);
+    } catch (_error) {
+      // Sem contexto de Blobs no evento (ex.: execução local fora do Netlify).
+    }
+  }
+}
+
 async function getStoreOrNull() {
   try {
-    return getStore({
-      name: STORE_NAME,
-      siteID: process.env.NETLIFY_SITE_ID,
-      token: process.env.NETLIFY_API_TOKEN
-    });
+    const siteID = process.env.NETLIFY_SITE_ID;
+    const token = process.env.NETLIFY_API_TOKEN;
+    // Credenciais explícitas são opcionais: em produção o Netlify injeta o contexto automaticamente.
+    const options = siteID && token ? { name: STORE_NAME, siteID, token } : { name: STORE_NAME };
+    return getStore(options);
   } catch (_error) {
     return null;
   }
@@ -43,7 +55,7 @@ async function getAdminConfig() {
 
   if (store) {
     try {
-      const config = await store.getJSON(STORE_KEY);
+      const config = await store.get(STORE_KEY, { type: 'json' });
       if (config && config.username && config.hash) {
         return config;
       }
@@ -81,6 +93,8 @@ async function persistAdminConfig(config) {
 }
 
 exports.handler = async function handler(event) {
+  connectBlobs(event);
+
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
