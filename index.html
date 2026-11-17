@@ -2592,10 +2592,9 @@ async function handleAdminPasswordChange(event){
   }
 
   const currentUser=String(sharedConfig.username||rec.username||'admin').trim().toLowerCase();
-  const currentHash=String(sharedConfig.hash||rec.hash||BASE_CRED_HASH).trim();
-  const curHash=await deriveCredentialHash(currentUser,curPass);
-  if(curHash!==currentHash){
-    showToast('Senha atual incorreta! Verifique e tente novamente.');
+
+  if(!curPass){
+    showToast('Informe a senha atual.');
     document.getElementById('secCurrentPass')?.focus();
     return;
   }
